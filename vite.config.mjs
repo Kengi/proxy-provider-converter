@@ -6,6 +6,11 @@ export default {
   plugins: [react(), tailwindcss()],
   root: ".",
   publicDir: "public",
+  server: {
+    proxy: {
+      "/api": "http://localhost:3001",
+    },
+  },
   build: {
     outDir: "dist",
     sourcemap: false,

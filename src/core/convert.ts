@@ -43,12 +43,19 @@ export async function convertFromSubscription(
   url: string,
   target: "clash" | "surge"
 ): Promise<string> {
-  let configFile = await fetchConfig(url);
-  if (configFile === null) {
-    throw new Error("Unable to get config");
+  const urls = url.split("|").map((u) => u.trim()).filter(Boolean);
+  const results = await Promise.allSettled(urls.map(fetchConfig));
+  const configFiles = results
+    .filter((r): r is { status: "fulfilled"; value: string | null } => r.status === "fulfilled" && r.value !== null)
+    .map((r) => r.value);
+  
+  if (configFiles.length === 0) {
+    throw new Error("Unable to get config from any URL");
   }
-  let source = getConfigType(configFile);
-
+  
+  const source = getConfigType(configFiles[0]);
+  const configFile = mergeConfigs(configFiles, source);
+  
   // Clash to Clash
   if (source === "clash" && target === "clash") {
     let config = parseClashConfig(configFile);
@@ -63,8 +70,7 @@ export async function convertFromSubscription(
 
   // Surge to Surge
   if (source === "surge" && target === "surge") {
-    // 提取 Surge 配置中的 [Proxy] 段落内容，并输出为 External Group 可用的节点列表
-    const lines = (configFile as string).split(/\r?\n/);
+    const lines = configFile.split(/\r?\n/);
     let inProxySection = false;
     const proxies: string[] = [];
 
@@ -77,11 +83,9 @@ export async function convertFromSubscription(
 
       if (!inProxySection) return;
 
-      // 跳过空行与注释
       if (line.length === 0) return;
       if (line.startsWith("#") || line.startsWith(";")) return;
 
-      // 保留原始行（去掉首尾空白），便于 Surge 直接识别
       proxies.push(line);
     });
 
@@ -115,7 +119,7 @@ export async function convertFromSubscription(
 
   // Surge to Clash
   if (source === "surge" && target === "clash") {
-    const lines = (configFile as string).split(/\r?\n/);
+    const lines = configFile.split(/\r?\n/);
     let inProxySection = false;
     const proxyLines: string[] = [];
 
@@ -151,6 +155,36 @@ export async function convertFromSubscription(
   }
 
   throw new Error("Unsupported conversion combination");
+}
+
+function mergeConfigs(configs: string[], type: "clash" | "surge"): string {
+  if (type === "clash") {
+    const allProxies: any[] = [];
+    for (const config of configs) {
+      const parsed = YAML.parse(config);
+      if (parsed?.proxies) {
+        allProxies.push(...parsed.proxies);
+      }
+    }
+    return YAML.stringify({ proxies: allProxies });
+  } else {
+    const allLines: string[] = [];
+    for (const config of configs) {
+      const lines = config.split(/\r?\n/);
+      let inProxySection = false;
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed.startsWith("[")) {
+          inProxySection = trimmed === "[Proxy]";
+          continue;
+        }
+        if (inProxySection && trimmed.length > 0 && !trimmed.startsWith("#") && !trimmed.startsWith(";")) {
+          allLines.push(trimmed);
+        }
+      }
+    }
+    return "[Proxy]\n" + allLines.join("\n");
+  }
 }
 
 async function fetchConfig(url: string): Promise<string | null> {
