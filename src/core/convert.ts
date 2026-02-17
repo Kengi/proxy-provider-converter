@@ -46,7 +46,7 @@ export async function convertFromSubscription(
   const urls = url.split("|").map((u) => u.trim()).filter(Boolean);
   const results = await Promise.allSettled(urls.map(fetchConfig));
   const configFiles = results
-    .filter((r): r is { status: "fulfilled"; value: string | null } => r.status === "fulfilled" && r.value !== null)
+    .filter((r): r is { status: "fulfilled"; value: string } => r.status === "fulfilled" && r.value !== null)
     .map((r) => r.value);
   
   if (configFiles.length === 0) {
